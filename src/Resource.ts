@@ -8,18 +8,26 @@ import safeParseNumber from './utils/safe-parse-number'
 
 type ParamsType = Record<string, any>;
 
+type ModelType = typeof BaseEntity & { withDeleted?: () => boolean | boolean };
+
 export class Resource extends BaseResource {
   public static validate: any;
 
-  private model: typeof BaseEntity;
+  protected model: ModelType;
 
-  private propsObject: Record<string, Property> = {};
+  protected propsObject: Record<string, Property> = {};
 
-  constructor(model: typeof BaseEntity) {
+  protected withDeleted = false;
+
+  constructor(model: ModelType) {
     super(model)
-
     this.model = model
     this.propsObject = this.prepareProps()
+    if (typeof model.withDeleted === 'function') {
+      this.withDeleted = !!model.withDeleted()
+    } else {
+      this.withDeleted = !!model.withDeleted
+    }
   }
 
   public databaseName(): string {
@@ -65,12 +73,13 @@ export class Resource extends BaseResource {
       order: {
         [sortBy]: (direction || 'asc').toUpperCase(),
       },
+      withDeleted: this.withDeleted,
     })
     return instances.map((instance) => new BaseRecord(instance, this))
   }
 
   public async findOne(id: string | number): Promise<BaseRecord | null> {
-    const instance = await this.model.findOne(id)
+    const instance = await this.model.findOne(id, { withDeleted: this.withDeleted })
     if (!instance) {
       return null
     }
@@ -78,7 +87,7 @@ export class Resource extends BaseResource {
   }
 
   public async findMany(ids: Array<string | number>): Promise<Array<BaseRecord>> {
-    const instances = await this.model.findByIds(ids)
+    const instances = await this.model.findByIds(ids, { withDeleted: this.withDeleted })
     return instances.map((instance) => new BaseRecord(instance, this))
   }
 
@@ -91,7 +100,7 @@ export class Resource extends BaseResource {
   }
 
   public async update(pk: string | number, params: any = {}): Promise<ParamsType> {
-    const instance = await this.model.findOne(pk)
+    const instance = await this.model.findOne(pk, { withDeleted: this.withDeleted })
     if (instance) {
       const preparedParams = flat.unflatten<any, any>(this.prepareParams(params))
       Object.keys(preparedParams).forEach((paramName) => {
@@ -117,7 +126,7 @@ export class Resource extends BaseResource {
     }
   }
 
-  private prepareProps() {
+  protected prepareProps() {
     const { columns } = this.model.getRepository().metadata
     return columns.reduce((memo, col, index) => {
       const property = new Property(col, index)
@@ -129,7 +138,7 @@ export class Resource extends BaseResource {
   }
 
   /** Converts params from string to final type */
-  private prepareParams(params: Record<string, any>): Record<string, any> {
+  protected prepareParams(params: Record<string, any>): Record<string, any> {
     const preparedParams: Record<string, any> = { ...params }
 
     this.properties().forEach((property) => {
